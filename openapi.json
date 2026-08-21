@@ -3476,6 +3476,16 @@
               "good"
             ]
           },
+          "filter_size": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Air filter size, free text (migration 485). Additive field — null when never set.",
+            "examples": [
+              "16x25x1"
+            ]
+          },
           "notes": {
             "type": [
               "string",
@@ -3708,6 +3718,18 @@
               "critical"
             ]
           },
+          "filter_size": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "Air filter size, free text (migration 485).",
+            "examples": [
+              "16x25x1"
+            ]
+          },
           "notes": {
             "type": [
               "string",
@@ -3831,6 +3853,18 @@
               "fair",
               "poor",
               "critical"
+            ]
+          },
+          "filter_size": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 40,
+            "description": "Air filter size, free text (migration 485).",
+            "examples": [
+              "16x25x1"
             ]
           },
           "notes": {
