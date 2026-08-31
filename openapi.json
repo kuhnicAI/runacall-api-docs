@@ -710,6 +710,16 @@
               "servicetitan"
             ]
           },
+          "job_number": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Human-readable sequential job number, unique within the organization. Format is `{prefix}-NNNN` where the prefix is the organization's configurable job prefix (default `JOB`) and the counter is zero-padded to at least 4 digits. Assigned by the platform when the job is created — read-only, and not accepted on create or update. Numbers are never reused, including for deleted jobs. Null only for jobs created before the numbering migration on an environment that has not yet backfilled.",
+            "examples": [
+              "JOB-0042"
+            ]
+          },
           "customer_id": {
             "type": "string",
             "format": "uuid"
@@ -1504,6 +1514,31 @@
             "format": "uuid",
             "description": "The estimate payment milestone this invoice bills, when `invoice_type === 'milestone'`. A job with a payment schedule produces one invoice per milestone, each with its own status, due date, and pay link. Null on non-milestone invoices."
           },
+          "amount_due_now": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "The amount the business is asking the customer to pay next through the online pay link (for example a deposit), or null when the pay link asks for the full remaining balance. Cleared automatically once recorded payments cover it. Read-only.",
+            "examples": [
+              3500
+            ]
+          },
+          "revised_at": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "date-time",
+            "description": "When the invoice was last edited AFTER being sent to the customer (lines, amounts, wording, due date or contact). Null when it has never been revised. If `revised_at` is later than `sent_at`, the customer still holds an earlier version."
+          },
+          "revision_count": {
+            "type": "integer",
+            "description": "Number of post-send revisions. 0 = never edited after sending.",
+            "examples": [
+              0
+            ]
+          },
           "created_at": {
             "type": "string",
             "format": "date-time"
@@ -1511,6 +1546,50 @@
           "updated_at": {
             "type": "string",
             "format": "date-time"
+          }
+        }
+      },
+      "InvoiceUpdatedEnvelope": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Stable event id (e.g. evt_a93a7817f5a8485d80204becea). Dedupe across retries by this value.",
+            "examples": [
+              "evt_a93a7817f5a8485d80204becea"
+            ]
+          },
+          "type": {
+            "type": "string",
+            "enum": [
+              "invoice.updated"
+            ]
+          },
+          "created_at": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "organization_id": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "data": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Invoice"
+              },
+              {
+                "type": "object",
+                "properties": {
+                  "object": {
+                    "type": "string",
+                    "enum": [
+                      "invoice"
+                    ]
+                  }
+                }
+              }
+            ]
           }
         }
       },
@@ -1647,6 +1726,34 @@
             "examples": [
               "pi_3OqK4nJ8ZcU2bC0a1Y2eX3f"
             ]
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Free-text payment reference — the check number for `check`, or a trace/confirmation number for `ach`/`zelle`/`wire`. Pushed to QuickBooks as the payment's `PaymentRefNum`. Null for Stripe-collected payments.",
+            "examples": [
+              "4417"
+            ]
+          },
+          "payer_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Who actually paid, when that differs from the invoice customer — a parent company, tenant, or warranty provider. Free text.",
+            "examples": [
+              "Johnson Controls Inc."
+            ]
+          },
+          "batch_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "Set when this payment is one allocation of a single larger payment - several payments sharing a `batch_id` were one cheque covering multiple invoices. Null for ordinary one-invoice payments."
           },
           "collected_at": {
             "type": "string",
@@ -2124,7 +2231,7 @@
             "type": "integer",
             "minimum": 1,
             "maximum": 100,
-            "description": "M5.a: number of equipment units this membership covers. Default 1 (matches pre-M5.a flat-pricing semantics). When the linked plan has `price_per_unit` configured, the MRR is per-unit: `price_per_unit + (units - 1) × price_each_additional`, capped at the plan's `max_units`. Otherwise the membership's flat plan price applies regardless of units.",
+            "description": "M5.a: number of equipment units this membership covers. Default 1 (matches pre-M5.a flat-pricing semantics). When the linked plan has `price_per_unit` configured, billing is per-unit: `price_per_unit + (units - 1) × price_each_additional`, capped at the plan's `max_units`, in the period the plan's per-unit amounts are entered in (per month, or per year when the plan's `price_per_unit_basis` is `annual` — then the monthly revenue contribution is that total ÷ 12). Otherwise the membership's flat plan price applies regardless of units.",
             "examples": [
               1,
               2
@@ -2133,6 +2240,23 @@
           "autopay_enabled": {
             "type": "boolean",
             "description": "Whether the membership is set up to be auto-charged on renewal against a saved customer card. **Currently always `false`** — Run a Call does not yet store customer cards, so membership renewals are collected manually from the emailed renewal invoice. Read-only on this surface; there is no API or in-app way to enable it today. The field is stable and will remain on the response — integrators can rely on it beginning to vary once saved-card autopay ships.",
+            "examples": [
+              false
+            ]
+          },
+          "term_years": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "description": "Commitment length in years. `1` is the classic plan. Prices stay per year: a prepaid multi-year enrollment invoices the plan's annual price × `term_years`. Copied from the plan at enrollment — editing the plan later never changes an existing membership.",
+            "examples": [
+              1,
+              5
+            ]
+          },
+          "prepaid_full_term": {
+            "type": "boolean",
+            "description": "`true` when the whole term is invoiced once (`billing_cycle` is then `annual` and `next_billing_date` / `end_date` sit `term_years` out). `false` = invoiced every `billing_cycle` inside the term.",
             "examples": [
               false
             ]
@@ -3411,7 +3535,7 @@
               "boolean",
               "null"
             ],
-            "description": "Per-equipment refrigerant tab visibility (migration 314). Defaults from the canonical type's `uses_refrigerant` at create time when omitted; explicit override wins."
+            "description": "Per-equipment refrigerant tab visibility (migration 314). When omitted at create time, defaults from whichever registry owns the type — the canonical HVAC type's `uses_refrigerant`, or the org custom type's. Explicit override wins."
           },
           "manufacturer": {
             "type": [
@@ -3481,7 +3605,7 @@
               "string",
               "null"
             ],
-            "description": "Air filter size, free text (migration 485). Additive field — null when never set.",
+            "description": "Air filter size, free text (migration 492). Additive field — null when never set.",
             "examples": [
               "16x25x1"
             ]
@@ -3648,7 +3772,7 @@
               "boolean",
               "null"
             ],
-            "description": "Per-equipment refrigerant tracking (migration 314). When omitted at create time, server defaults from the canonical type's `uses_refrigerant`."
+            "description": "Per-equipment refrigerant tracking (migration 314). When omitted at create time, server defaults from the canonical HVAC type's `uses_refrigerant`, or from the org custom type's when the type is org-defined."
           },
           "manufacturer": {
             "type": [
@@ -3725,7 +3849,7 @@
             ],
             "minLength": 1,
             "maxLength": 40,
-            "description": "Air filter size, free text (migration 485).",
+            "description": "Air filter size, free text (migration 492).",
             "examples": [
               "16x25x1"
             ]
@@ -3862,7 +3986,7 @@
             ],
             "minLength": 1,
             "maxLength": 40,
-            "description": "Air filter size, free text (migration 485).",
+            "description": "Air filter size, free text (migration 492).",
             "examples": [
               "16x25x1"
             ]
@@ -4586,7 +4710,8 @@
               "monthly",
               "quarterly",
               "semi_annual",
-              "annual"
+              "annual",
+              "one_time"
             ]
           },
           "start_date": {
@@ -4623,7 +4748,24 @@
             ],
             "examples": [
               "2026-09-15"
-            ]
+            ],
+            "description": "YYYY-MM-DD (a full ISO timestamp is accepted and normalised to its date part). The next covered tune-up. Omitted on create ⇒ computed as start_date + floor(365 / visits_per_year) days. Omitted on an external-id update ⇒ unchanged. Explicit null ⇒ no tune-up scheduled. Completing a covered tune-up in Run a Call advances this date by the plan interval on the membership's own cadence."
+          },
+          "term_years": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 10,
+            "examples": [
+              5
+            ],
+            "description": "Commitment length in years. Omitted on create ⇒ the plan's `term_years`. Omitted on an external-id update ⇒ unchanged."
+          },
+          "prepaid_full_term": {
+            "type": "boolean",
+            "examples": [
+              true
+            ],
+            "description": "Invoice the whole term at once (annual price × `term_years`). Requires `billing_cycle: \"annual\"`. Default `false`."
           }
         },
         "required": [
@@ -12558,6 +12700,40 @@
         }
       }
     },
+    "invoice.updated": {
+      "post": {
+        "tags": [
+          "Webhooks"
+        ],
+        "summary": "invoice.updated",
+        "description": "An invoice the customer already holds was edited after sending — lines, amounts, wording, due date or contact. Fires once per editing burst (debounced ~90 s per invoice) after QuickBooks has been brought up to date; `revised_at` and `revision_count` on the payload identify the revision. Drafts never fire this (they fire `invoice.issued` when first sent).",
+        "requestBody": {
+          "required": true,
+          "description": "Webhook event envelope POST'd to the subscriber URL.",
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InvoiceUpdatedEnvelope"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Subscriber acknowledged delivery."
+          },
+          "202": {
+            "description": "Subscriber accepted delivery for async processing."
+          },
+          "204": {
+            "description": "Subscriber acknowledged delivery (no body)."
+          },
+          "default": {
+            "description": "Anything other than 2xx triggers a retry (up to 3 attempts). After 10 consecutive terminal failures the subscription auto-pauses."
+          }
+        }
+      }
+    },
     "invoice.paid": {
       "post": {
         "tags": [
@@ -12734,7 +12910,7 @@
           "Webhooks"
         ],
         "summary": "membership.renewed",
-        "description": "A renewal invoice was paid and the membership rolled forward — `next_billing_date`, `next_maintenance_date`, and `end_date` advanced one billing cycle; `maintenance_jobs_created_count` reset to 0; `last_renewed_at` stamped to now. Fires when the renewal invoice is marked paid — today that is always a manual collection, since Run a Call does not store customer cards. Auto-charged renewals, when they ship, will flow through this same handler and event. Idempotent — re-fires of the same `invoice.paid` event (e.g., Stripe webhook retries) do NOT double-emit.",
+        "description": "A renewal invoice was paid and the membership rolled forward — `next_billing_date` and `end_date` advanced one billing cycle; `next_maintenance_date` is kept as-is (it follows the tune-up cadence and advances when a covered tune-up is completed; a stale date is stepped forward on that same cadence, and a missing one is computed from the billing date); `maintenance_jobs_created_count` resets to 0 only when the renewal crosses into a new plan-year; `last_renewed_at` stamped to now. Fires when the renewal invoice is marked paid — today that is always a manual collection, since Run a Call does not store customer cards. Auto-charged renewals, when they ship, will flow through this same handler and event. Idempotent — re-fires of the same `invoice.paid` event (e.g., Stripe webhook retries) do NOT double-emit.",
         "requestBody": {
           "required": true,
           "description": "Webhook event envelope POST'd to the subscriber URL.",
