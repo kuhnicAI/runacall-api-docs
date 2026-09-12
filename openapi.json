@@ -649,7 +649,7 @@
               "null"
             ],
             "format": "date-time",
-            "description": "Optional per-tech window override. When null, falls back to the appointment-level scheduled_start."
+            "description": "A helper's own hours on this appointment, or null for the appointment's window. Only helpers carry hours; the Lead's pair is always null. A helper's window must sit inside the appointment window on the same day, and is cleared automatically when the appointment is retimed so it no longer fits."
           },
           "scheduled_end": {
             "type": [
@@ -1707,7 +1707,7 @@
           },
           "method": {
             "type": "string",
-            "description": "Payment method. One of: `credit_card`, `ach`, `zelle`, `wire`, `check`, `cash`.",
+            "description": "Payment method kind. One of: `credit_card` (online card via Stripe), `card` (card charged on-site), `ach`, `zelle`, `wire`, `check`, `cash`, `financing` (third-party consumer financing). When `payment_method_id` is set this is that method's kind.",
             "examples": [
               "credit_card"
             ]
@@ -1754,6 +1754,24 @@
             ],
             "format": "uuid",
             "description": "Set when this payment is one allocation of a single larger payment - several payments sharing a `batch_id` were one cheque covering multiple invoices. Null for ordinary one-invoice payments."
+          },
+          "payment_method_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "The organization-defined payment method this payment was recorded under (e.g. \"Podium Credit Card\"), when one was chosen. Null means the built-in `method`."
+          },
+          "payment_method_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Display name of `payment_method_id`. Null when no organization-defined method was chosen.",
+            "examples": [
+              "Podium Credit Card"
+            ]
           },
           "collected_at": {
             "type": "string",
@@ -2239,7 +2257,7 @@
           },
           "autopay_enabled": {
             "type": "boolean",
-            "description": "Whether the membership is set up to be auto-charged on renewal against a saved customer card. **Currently always `false`** — Run a Call does not yet store customer cards, so membership renewals are collected manually from the emailed renewal invoice. Read-only on this surface; there is no API or in-app way to enable it today. The field is stable and will remain on the response — integrators can rely on it beginning to vary once saved-card autopay ships.",
+            "description": "Whether the membership is set up to be auto-charged on renewal against the customer's card on file. Turned on in-app when the office enrolls a customer who has a card on file (Customers → Cards on file → Add a card); there is no API way to change it. When true, the renewal invoice is charged off-session on the due date (the org's card fee applies) and a declined card surfaces in the office's Card failed worklist. Read-only on this surface.",
             "examples": [
               false
             ]
@@ -2259,6 +2277,30 @@
             "description": "`true` when the whole term is invoiced once (`billing_cycle` is then `annual` and `next_billing_date` / `end_date` sit `term_years` out). `false` = invoiced every `billing_cycle` inside the term.",
             "examples": [
               false
+            ]
+          },
+          "covered_systems": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "format": "uuid"
+                },
+                "name": {
+                  "type": "string"
+                }
+              }
+            },
+            "description": "The equipment systems (see /v1/equipment-systems) this membership covers by name. Empty when the enrollment recorded a unit count only. Set at enrollment with `equipment_system_ids` on POST; edited in-app afterwards.",
+            "examples": [
+              [
+                {
+                  "id": "6f1c1c22-3b4a-4f0c-9c1e-3f4b2a1d5e77",
+                  "name": "Downstairs"
+                }
+              ]
             ]
           },
           "created_at": {
@@ -3610,6 +3652,16 @@
               "16x25x1"
             ]
           },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Where the unit sits on the property, free text 1-80 chars (migration 563). Additive field — null when never set.",
+            "examples": [
+              "3rd floor"
+            ]
+          },
           "notes": {
             "type": [
               "string",
@@ -3854,6 +3906,18 @@
               "16x25x1"
             ]
           },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "Where the unit sits, e.g. \"3rd floor\" (migration 563).",
+            "examples": [
+              "3rd floor"
+            ]
+          },
           "notes": {
             "type": [
               "string",
@@ -3989,6 +4053,18 @@
             "description": "Air filter size, free text (migration 492).",
             "examples": [
               "16x25x1"
+            ]
+          },
+          "location": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "minLength": 1,
+            "maxLength": 80,
+            "description": "Where the unit sits, e.g. \"3rd floor\" (migration 563).",
+            "examples": [
+              "3rd floor"
             ]
           },
           "notes": {
@@ -4587,7 +4663,7 @@
               "string",
               "null"
             ],
-            "description": "Optional per-tech window override; falls back to the appointment-level window when null."
+            "description": "Helper-only hours inside the appointment window (send both start and end, or null for the whole appointment). Ignored for role='lead'. Out-of-window hours return 422."
           },
           "scheduled_end": {
             "type": [
@@ -4624,7 +4700,7 @@
             ]
           }
         },
-        "description": "Change a tech's role on an appointment or update their per-tech window override. Promoting to Lead auto-demotes the previous Lead. `tech_state` / clock fields are mobile-app-driven, not exposed for write."
+        "description": "Change a tech's role on an appointment or set a helper's own hours (both start and end inside the appointment window; null clears). Promoting to Lead auto-demotes the previous Lead and clears the promoted tech's hours — the Lead always works the appointment's window, so hours on a Lead return 422. `tech_state` / clock fields are mobile-app-driven, not exposed for write."
       },
       "MembershipList": {
         "type": "object",
@@ -5287,12 +5363,15 @@
             "type": "string",
             "enum": [
               "credit_card",
+              "card",
               "ach",
               "zelle",
               "wire",
               "check",
-              "cash"
-            ]
+              "cash",
+              "financing"
+            ],
+            "description": "Payment method kind. When `payment_method_id` is given, the stored kind is that method's and this value is ignored."
           },
           "status": {
             "type": "string",
@@ -5314,6 +5393,30 @@
               "null"
             ],
             "maxLength": 200
+          },
+          "reference": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 21,
+            "description": "Check number or transfer confirmation. 21 characters max (QuickBooks PaymentRefNum)."
+          },
+          "payer_name": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 100,
+            "description": "Who paid, when that differs from the invoice customer."
+          },
+          "payment_method_id": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "format": "uuid",
+            "description": "An organization-defined payment method (as configured in Settings). Must belong to the organization and be active, else 422."
           }
         },
         "required": [
@@ -10874,9 +10977,13 @@
               "type": "string",
               "enum": [
                 "credit_card",
+                "card",
                 "ach",
+                "zelle",
+                "wire",
                 "check",
-                "cash"
+                "cash",
+                "financing"
               ]
             },
             "required": false,
